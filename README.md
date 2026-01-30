@@ -1,4 +1,5 @@
-# Active learning design of bcc solid solution alloys with gigapascal strength and elemental metal-level ductility
+<img width="1108" height="950" alt="image" src="https://github.com/user-attachments/assets/e57a5593-4446-439c-b2aa-fc204afff3e4" /># Active learning design of bcc solid solution alloys with gigapascal strength and elemental metal-level ductility
 A machine learning framework using active learning strategies to accelerate the design of BCC solid solution high-entropy alloys
 This work successfully accelerated the discovery of optimal multi-principal-element alloys (MPEAs) by integrating active learning with physical parameters, leading to the identification of a Ti36V14Nb22Hf22Zr1Al5 alloy with exceptional properties. The coupling between nanoscale compositional fluctuations and lattice distortion serves as the fundamental mechanism for the alloy's stable strain hardening behavior. This breakthrough overcomes the limited ductility in traditional body-centered cubic (bcc) alloys caused by planar dislocation slip. This research establishes an innovative framework for alloy design and introduces an novel pathway to promote the strength-ductility synergy of MPEAs.
-<img width="1240" height="1063" alt="image" src="https://github.com/user-attachments/assets/9f2401f4-0bb8-4edb-8819-b98359e84971" />
+<img width="1108" height="950" alt="image" src="https://github.com/user-attachments/assets/30a72e19-95f2-4a4d-9adb-e25ae050bd4e" />
+
