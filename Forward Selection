@@ -41,6 +41,7 @@ for size in group_sizes:
 group_labels = np.array(group_labels)
 
 def evaluate_model_with_ten_fold_cv(X, y):
+    all_rmse_results = []
     all_y_true = []
     all_y_pred = []
     for seed in range(40, 50):
