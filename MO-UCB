@@ -1,0 +1,436 @@
+import numpy as np
+import pandas as pd
+from scipy.stats import norm
+import joblib
+from sklearn.preprocessing import StandardScaler
+import warnings
+import time
+import csv
+import matplotlib.pyplot as plt
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+def calculate_features_and_predict(V, Zr, Nb, Hf, Ta, Al, Mo, T1, t1, cold_rolling, T2, t2, models):
+    V = round(V, 2)
+    Zr = round(Zr, 2)
+    Nb = round(Nb, 2)
+    Hf = round(Hf, 2)
+    Ta = round(Ta, 2)
+    Al = round(Al, 2)
+    Mo = round(Mo, 2)
+    other_elements_sum = V + Zr + Nb + Hf + Ta + Al + Mo
+    Ti = round(1 - other_elements_sum, 2)
+    
+    if cold_rolling < 85:
+        cold_rolling = 80
+    else:
+        cold_rolling = 90
+    
+    if T2 < 950:
+        T2 = 900
+    else:
+        T2 = 1000
+    
+    t2 = 5
+    
+    X1_14 = Ti*0.079 + V*0.525 + Zr*0.426 + Nb*0.917406 + Hf*0.014 + Ta*0.322 + Al*0.43283 + Mo*0.748
+    X1_15 = Ti*1.54 + V*1.63 + Zr*1.33 + Nb*1.6 + Hf*1.3 + Ta*1.5 + Al*1.61 + Mo*2.16
+    X1_16 = Ti*2.95 + V*3.02 + Zr*3.23 + Nb*3.3 + Hf*3.2 + Ta*3.31 + Al*4.05 + Mo*3.15
+    X1_17 = -8.314 * (
+        (Ti * np.log(Ti) if Ti > 0 else 0) +
+        (V * np.log(V) if V > 0 else 0) +
+        (Zr * np.log(Zr) if Zr > 0 else 0) +
+        (Nb * np.log(Nb) if Nb > 0 else 0) +
+        (Hf * np.log(Hf) if Hf > 0 else 0) +
+        (Ta * np.log(Ta) if Ta > 0 else 0) +
+        (Al * np.log(Al) if Al > 0 else 0) +
+        (Mo * np.log(Mo) if Mo > 0 else 0)
+    )
+    X1_18 = (Ti*1943.15 + V*2183.15 + Zr*2127.15 + Nb*2750.15 + Hf*2506.15 + Ta*3290.15 + Al*933.473 + Mo*2895.15) * \
+        (-8.314 * (
+            (Ti * np.log(Ti) if Ti > 0 else 0) +
+            (V * np.log(V) if V > 0 else 0) +
+            (Zr * np.log(Zr) if Zr > 0 else 0) +
+            (Nb * np.log(Nb) if Nb > 0 else 0) +
+            (Hf * np.log(Hf) if Hf > 0 else 0) +
+            (Ta * np.log(Ta) if Ta > 0 else 0) +
+            (Al * np.log(Al) if Al > 0 else 0) +
+            (Mo * np.log(Mo) if Mo > 0 else 0)
+        )) / (4 * (-Ti*V*2 + Ti*Nb*2 + Ti*Ta - Ti*Al*30 - Zr*V*4 + Zr*Nb*4 +
+                    Zr*Ta*3 - Zr*Al*44 - Hf*V*2 + Hf*Nb*4 + Hf*Ta*3 - Hf*Al*39 -
+                    V*Nb - V*Ta - V*Al*16 - Nb*Al*18 - Ta*Al*18 + Mo*Ti*46 -
+                    Mo*Zr*6 - Mo*Nb*6 - Mo*Hf*4 - Mo*Ta*5 + Mo*Al*5))
+    
+    sum_atomic_weight = Ti*146.2 + V*131.6 + Zr*160.3 + Nb*142.9 + Hf*157.8 + Ta*146 + Al*143.2 + Mo*139
+    elastic_modulus_sum = Ti*44 + V*47 + Zr*33 + Nb*38 + Hf*30 + Ta*69 + Al*26 + Mo*120
+    atomic_radius_diff = 100 * np.sqrt(
+        Ti * (1 - 146.2/sum_atomic_weight)**2 +
+        V * (1 - 131.6/sum_atomic_weight)**2 +
+        Zr * (1 - 160.3/sum_atomic_weight)**2 +
+        Nb * (1 - 142.9/sum_atomic_weight)**2 +
+        Hf * (1 - 157.8/sum_atomic_weight)**2 +
+        Ta * (1 - 146/sum_atomic_weight)**2 +
+        Al * (1 - 143.2/sum_atomic_weight)**2 +
+        Mo * (1 - 139/sum_atomic_weight)**2
+    )
+    modulus_sum = Ti*116 + V*128 + Zr*68 + Nb*105 + Hf*78 + Ta*186 + Al*70 + Mo*230
+    modulus_radius_product = 0.5 * modulus_sum * atomic_radius_diff
+    X1_19 = elastic_modulus_sum * atomic_radius_diff * ((1 + modulus_radius_product) / (1 - modulus_radius_product))
+    elastic_modulus = Ti*44 + V*47 + Zr*33 + Nb*38 + Hf*30 + Ta*69 + Al*26 + Mo*120
+    X1_20 = 2 * elastic_modulus / (1 - X1_19)
+    
+    X2_14 = Ti*47.867 + V*50.9415 + Zr*91.224 + Nb*92.90637 + Hf*178.49 + Ta*180.94788 + Al*26.9815385 + Mo*95.95
+    X2_15 = Ti*0.079 + V*0.525 + Zr*0.426 + Nb*0.917406 + Hf*0.014 + Ta*0.322 + Al*0.43283 + Mo*0.748
+    X2_16 = Ti*4 + V*5 + Zr*4 + Nb*5 + Hf*4 + Ta*5 + Al*3 + Mo*6
+    X2_17 = Ti*2.95 + V*3.02 + Zr*3.23 + Nb*3.3 + Hf*3.2 + Ta*3.31 + Al*4.05 + Mo*3.15
+    X2_18 = Ti*970 + V*628 + Zr*903 + Nb*1320 + Hf*1760 + Ta*873 + Al*167 + Mo*1530
+    X2_19 = Ti*116 + V*128 + Zr*68 + Nb*105 + Hf*78 + Ta*186 + Al*70 + Mo*230
+    X2_20 = Ti*4.33 + V*4.3 + Zr*4.05 + Nb*4.3 + Hf*3.9 + Ta*4.25 + Al*4.28 + Mo*4.37
+    
+    X1_columns = ['Ti', 'V', 'Zr', 'Nb', 'Hf', 'Ta', 'Al', 'Mo', 'T1_uniform', 't1_h', 'cold_rolling_pct', 'T2_recryst', 't2_min', 'EA', 'chi', 'a', 'delta_r', 'gamma', 'mu', 'F']
+    X2_columns = ['Ti', 'V', 'Zr', 'Nb', 'Hf', 'Ta', 'Al', 'Mo', 'T1_uniform', 't1_h', 'cold_rolling_pct', 'T2_recryst', 't2_min', 'Ar', 'EA', 'VEC', 'a', 'Hv', 'mu', 'w']
+    
+    X1_features = [Ti, V, Zr, Nb, Hf, Ta, Al, Mo, T1, t1, cold_rolling, T2, t2, X1_14, X1_15, X1_16, X1_17, X1_18, X1_19, X1_20]
+    X2_features = [Ti, V, Zr, Nb, Hf, Ta, Al, Mo, T1, t1, cold_rolling, T2, t2, X2_14, X2_15, X2_16, X2_17, X2_18, X2_19, X2_20]
+    
+    X1 = pd.DataFrame([X1_features], columns=X1_columns).to_numpy()
+    X2 = pd.DataFrame([X2_features], columns=X2_columns).to_numpy()
+    
+    yield_mean_prediction, yield_uncertainty, elongation_mean_prediction, elongation_uncertainty = predict_with_loaded_models(X1, X2, models)
+    
+    return yield_mean_prediction[0], yield_uncertainty[0], elongation_mean_prediction[0], elongation_uncertainty[0], Ti, V, Zr, Nb, Hf, Ta, Al, Mo
+
+class CustomOptimizer:
+    def __init__(self, pbounds, random_state=42, top_n=10):
+        self.pbounds = pbounds
+        self.random_state = random_state
+        self.params = list(pbounds.keys())
+        self.dim = len(pbounds)
+        self.observed = []
+        self.best_target = -np.inf
+        self.best_params = None
+        self.best_comp_values = None
+        self.res = []
+        self.top_n = top_n
+        self.top_results = []
+
+    def random_sample(self, n_points=10):
+        points = []
+        np.random.seed(self.random_state)
+        attempt_count = 0
+        max_attempts = n_points * 10
+        
+        while len(points) < n_points and attempt_count < max_attempts:
+            attempt_count += 1
+            point = {}
+            for param, bounds in self.pbounds.items():
+                point[param] = np.random.uniform(bounds[0], bounds[1])
+                if param in ['V', 'Zr', 'Nb', 'Hf', 'Ta', 'Al', 'Mo']:
+                    point[param] = round(point[param], 2)
+            
+            other_elements_sum = point.get('V', 0) + point.get('Zr', 0) + point.get('Nb', 0) + point.get('Hf', 0) + point.get('Ta', 0) + point.get('Al', 0) + point.get('Mo', 0)
+            Ti = round(1 - other_elements_sum, 2)
+            
+            if 0.2 <= Ti <= 0.6:
+                point['Ti'] = Ti
+                points.append(point)
+        
+        return points
+
+    def update_top_results(self, params, target, yield_mean, yield_std, elong_mean, elong_std, Ti, V, Zr, Nb, Hf, Ta, Al, Mo):
+        duplicate = False
+        for existing_result in self.top_results:
+            if abs(existing_result['target'] - target) < 1e-6:
+                duplicate = True
+                break
+        
+        if duplicate:
+            return False
+        
+        result = {
+            'params': params.copy(),
+            'comp_values': {'Ti': Ti, 'V': V, 'Zr': Zr, 'Nb': Nb, 'Hf': Hf, 'Ta': Ta, 'Al': Al, 'Mo': Mo},
+            'target': target,
+            'yield_mean': yield_mean,
+            'yield_std': yield_std,
+            'elong_mean': elong_mean,
+            'elong_std': elong_std
+        }
+        
+        updated = False
+        if len(self.top_results) < self.top_n:
+            self.top_results.append(result)
+            self.top_results.sort(key=lambda x: x['target'], reverse=True)
+            updated = True
+        elif target > self.top_results[-1]['target']:
+            self.top_results[-1] = result
+            self.top_results.sort(key=lambda x: x['target'], reverse=True)
+            updated = True
+        
+        return updated
+
+    def suggest_next_point(self, n_candidates=100, models=None, acq_function='product'):
+        candidates = self.random_sample(n_candidates)
+        acquisition_values = []
+        
+        for candidate in candidates:
+            V = candidate['V']
+            Zr = candidate['Zr']
+            Nb = candidate['Nb']
+            Hf = candidate['Hf']
+            Ta = candidate['Ta']
+            Al = candidate['Al']
+            Mo = candidate['Mo']
+            T1 = candidate['T1']
+            t1 = candidate['t1']
+            cold_rolling = candidate['cold_rolling']
+            T2 = candidate['T2']
+            t2 = candidate['t2']
+            
+            try:
+                yield_mean, yield_std, elong_mean, elong_std, Ti, V, Zr, Nb, Hf, Ta, Al, Mo = calculate_features_and_predict(V, Zr, Nb, Hf, Ta, Al, Mo, T1, t1, cold_rolling, T2, t2, models)
+              
+                if acq_function == 'ucb':
+                    kappa = 2.0
+                    acq_value = self.upper_confidence_bound(yield_mean * elong_mean, yield_std * elong_std, kappa)
+                elif acq_function == 'product':
+                    acq_value = (yield_mean + yield_std) * (elong_mean + elong_std)
+                elif acq_function == 'custom':
+                    w_yield_mean = 0.4
+                    w_yield_std = 0.1
+                    w_elong_mean = 0.4
+                    w_elong_std = 0.1
+                    acq_value = (w_yield_mean * yield_mean + w_yield_std * yield_std) * (w_elong_mean * elong_mean + w_elong_std * elong_std)
+                else:
+                    acq_value = (yield_mean + yield_std) * (elong_mean + elong_std)
+                
+                target = acq_value
+                self.update_top_results(candidate, target, yield_mean, yield_std, elong_mean, elong_std, Ti, V, Zr, Nb, Hf, Ta, Al, Mo)
+                acquisition_values.append((candidate, acq_value))
+            except Exception as e:
+                acquisition_values.append((candidate, -np.inf))
+        
+        best_candidate = max(acquisition_values, key=lambda x: x[1])[0]
+        return best_candidate
+
+    def maximize(self, init_points=10, n_iter=5, acq_function='product'):
+        yield_seeds = [40, 41, 42, 43，44]
+        elongation_seeds = [40, 41, 42, 43，44]
+        models = load_models(yield_seeds, elongation_seeds)
+        
+        initial_points = self.random_sample(init_points)
+        
+        for i, point in enumerate(initial_points):
+            V = point['V']
+            Zr = point['Zr']
+            Nb = point['Nb']
+            Hf = point['Hf']
+            Ta = point['Ta']
+            Al = point['Al']
+            Mo = point['Mo']
+            T1 = point['T1']
+            t1 = point['t1']
+            cold_rolling = point['cold_rolling']
+            T2 = point['T2']
+            t2 = point['t2']
+            
+            yield_mean, yield_std, elong_mean, elong_std, Ti, V, Zr, Nb, Hf, Ta, Al, Mo = calculate_features_and_predict(V, Zr, Nb, Hf, Ta, Al, Mo, T1, t1, cold_rolling, T2, t2, models)
+            target = (yield_mean + yield_std) * (elong_mean + elong_std)
+            
+            self.observed.append({
+                'params': point,
+                'comp_values': {'Ti': Ti, 'V': V, 'Zr': Zr, 'Nb': Nb, 'Hf': Hf, 'Ta': Ta, 'Al': Al, 'Mo': Mo},
+                'target': target,
+                'yield_mean': yield_mean,
+                'yield_std': yield_std,
+                'elong_mean': elong_mean,
+                'elong_std': elong_std
+            })
+            self.res.append({'params': point, 'target': target})
+            
+            if target > self.best_target:
+                self.best_target = target
+                self.best_params = point
+                self.best_comp_values = {'Ti': Ti, 'V': V, 'Zr': Zr, 'Nb': Nb, 'Hf': Hf, 'Ta': Ta, 'Al': Al, 'Mo': Mo}
+            
+            self.update_top_results(point, target, yield_mean, yield_std, elong_mean, elong_std, Ti, V, Zr, Nb, Hf, Ta, Al, Mo)
+        
+        for i in range(n_iter):
+            next_point = self.suggest_next_point(n_candidates=50, models=models, acq_function=acq_function)
+            
+            V = next_point['V']
+            Zr = next_point['Zr']
+            Nb = next_point['Nb']
+            Hf = next_point['Hf']
+            Ta = next_point['Ta']
+            Al = next_point['Al']
+            Mo = next_point['Mo']
+            T1 = next_point['T1']
+            t1 = next_point['t1']
+            cold_rolling = next_point['cold_rolling']
+            T2 = next_point['T2']
+            t2 = next_point['t2']
+            
+            yield_mean, yield_std, elong_mean, elong_std, Ti, V, Zr, Nb, Hf, Ta, Al, Mo = calculate_features_and_predict(V, Zr, Nb, Hf, Ta, Al, Mo, T1, t1, cold_rolling, T2, t2, models)
+            target = (yield_mean + yield_std) * (elong_mean + elong_std)
+            
+            self.observed.append({
+                'params': next_point,
+                'comp_values': {'Ti': Ti, 'V': V, 'Zr': Zr, 'Nb': Nb, 'Hf': Hf, 'Ta': Ta, 'Al': Al, 'Mo': Mo},
+                'target': target,
+                'yield_mean': yield_mean,
+                'yield_std': yield_std,
+                'elong_mean': elong_mean,
+                'elong_std': elong_std
+            })
+            self.res.append({'params': next_point, 'target': target})
+            
+            if target > self.best_target:
+                self.best_target = target
+                self.best_params = next_point
+                self.best_comp_values = {'Ti': Ti, 'V': V, 'Zr': Zr, 'Nb': Nb, 'Hf': Hf, 'Ta': Ta, 'Al': Al, 'Mo': Mo}
+            
+            self.update_top_results(next_point, target, yield_mean, yield_std, elong_mean, elong_std, Ti, V, Zr, Nb, Hf, Ta, Al, Mo)
+        
+        return {"target": self.best_target, "params": self.best_params, "comp_values": self.best_comp_values, "top_results": self.top_results}
+
+pbounds = {
+    'V': (0, 0.2),
+    'Zr': (0, 0.04),
+    'Nb': (0, 0.25),
+    'Hf': (0.1, 0.25),
+    'Ta': (0, 0.000000000001),
+    'Al': (0, 0.1),
+    'Mo': (0, 0.000000000001),
+    'T1': (25, 25.00000000001),
+    't1': (0, 0.00000000000001),
+    'cold_rolling': (80, 90),
+    'T2': (900, 1000),
+    't2': (5, 5.00000000001)
+}
+
+def main():
+    start_time = time.time()
+    custom_optimizer = CustomOptimizer(pbounds=pbounds, random_state=42, top_n=10)
+    result = custom_optimizer.maximize(init_points=10, n_iter=5, acq_function='product')
+    end_time = time.time()
+    
+    yield_seeds = [40, 41, 42, 43, 44]
+    elongation_seeds = [40, 41, 42, 43, 44]
+    models = load_models(yield_seeds, elongation_seeds)
+    
+    best_params = result['params']
+    yield_mean, yield_std, elong_mean, elong_std, Ti, V, Zr, Nb, Hf, Ta, Al, Mo = calculate_features_and_predict(
+        best_params['V'], best_params['Zr'], best_params['Nb'],
+        best_params['Hf'], best_params['Ta'], best_params['Al'], best_params['Mo'],
+        best_params['T1'], best_params['t1'], best_params['cold_rolling'],
+        best_params['T2'], best_params['t2'], models
+    )
+    
+    with open('opt_performance.csv', 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['Rank', 'Objective', 'Yield_MPa', 'Yield_Std', 'Elongation_Pct', 'Elong_Std'])
+        for i, res in enumerate(result['top_results']):
+            writer.writerow([i+1, res['target'], res['yield_mean'], res['yield_std'], res['elong_mean'], res['elong_std']])
+    
+    with open('opt_parameters.csv', 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        header_row = ['Rank']
+        for param in custom_optimizer.params:
+            header_row.append(param)
+        writer.writerow(header_row)
+        for i, res in enumerate(result['top_results']):
+            row = [i+1]
+            for param in custom_optimizer.params:
+                row.append(res['params'][param])
+            writer.writerow(row)
+    
+    with open('opt_composition.csv', 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['Rank', 'Ti', 'V', 'Zr', 'Nb', 'Hf', 'Ta', 'Al', 'Mo', 'Total', 'Cold_Rolling_Pct', 'Recryst_Temp_C', 'Recryst_Time_Min'])
+        for i, res in enumerate(result['top_results']):
+            comp_values = res['comp_values']
+            total = sum(comp_values.values())
+            cold_rolling = 80 if res['params']['cold_rolling'] < 85 else 90
+            T2 = 900 if res['params']['T2'] < 950 else 1000
+            t2 = 5
+            writer.writerow([i+1, comp_values['Ti'], comp_values['V'], comp_values['Zr'], comp_values['Nb'], comp_values['Hf'], comp_values['Ta'], comp_values['Al'], comp_values['Mo'], total, cold_rolling, T2, t2])
+    
+    with open('opt_process.csv', 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['Rank', 'Cold_Rolling_Pct', 'Recryst_Temp_C', 'Recryst_Time_Min', 'Yield_MPa', 'Elongation_Pct', 'Objective'])
+        for i, res in enumerate(result['top_results']):
+            cold_rolling = 80 if res['params']['cold_rolling'] < 85 else 90
+            T2 = 900 if res['params']['T2'] < 950 else 1000
+            t2 = 5
+            writer.writerow([i+1, cold_rolling, T2, t2, res['yield_mean'], res['elong_mean'], res['target']])
+    
+    try:
+        targets = [obs['target'] for obs in custom_optimizer.observed]
+        iterations = range(len(targets))
+        plt.figure(figsize=(10, 6))
+        plt.plot(iterations, targets, 'bo-')
+        plt.axhline(y=result['target'], color='r', linestyle='--', label='Best')
+        plt.xlabel('Iteration')
+        plt.ylabel('Objective')
+        plt.title('Optimization Progress')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig('opt_progress.png')
+        plt.show()
+        
+        if len(result['top_results']) > 1:
+            ranks = range(1, len(result['top_results']) + 1)
+            objectives = [res['target'] for res in result['top_results']]
+            yields = [res['yield_mean'] for res in result['top_results']]
+            elongations = [res['elong_mean'] for res in result['top_results']]
+            
+            fig, axs = plt.subplots(3, 1, figsize=(10, 12))
+            axs[0].bar(ranks, objectives, color='blue')
+            axs[0].set_xlabel('Rank')
+            axs[0].set_ylabel('Objective')
+            axs[0].set_title('Top Results Objective')
+            axs[0].grid(True, axis='y')
+            
+            axs[1].bar(ranks, yields, color='green')
+            axs[1].set_xlabel('Rank')
+            axs[1].set_ylabel('Yield MPa')
+            axs[1].set_title('Top Results Yield')
+            axs[1].grid(True, axis='y')
+            
+            axs[2].bar(ranks, elongations, color='orange')
+            axs[2].set_xlabel('Rank')
+            axs[2].set_ylabel('Elongation %')
+            axs[2].set_title('Top Results Elongation')
+            axs[2].grid(True, axis='y')
+            
+            plt.tight_layout()
+            plt.savefig('top_comparison.png')
+            plt.show()
+            
+            plt.figure(figsize=(12, 8))
+            elements = ['Ti', 'V', 'Zr', 'Nb', 'Hf', 'Ta', 'Al', 'Mo']
+            num_elements = len(elements)
+            num_results = len(result['top_results'])
+            x = np.arange(num_elements)
+            width = 0.15
+            colors = ['blue', 'green', 'red', 'orange', 'purple']
+            
+            for i, res in enumerate(result['top_results']):
+                comp_values = res['comp_values']
+                values = [comp_values[element] for element in elements]
+                plt.bar(x + i*width - (num_results-1)*width/2, values, width, label=f'Rank {i+1}', color=colors[i%len(colors)])
+            
+            plt.xlabel('Element')
+            plt.ylabel('Composition')
+            plt.title('Top Results Composition')
+            plt.xticks(x, elements)
+            plt.legend()
+            plt.grid(True, axis='y')
+            plt.savefig('composition_comparison.png')
+            plt.show()
+    except Exception as e:
+        pass
+
+if __name__ == "__main__":
+    main()

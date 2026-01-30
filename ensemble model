@@ -1,0 +1,281 @@
+import pandas as pd
+import numpy as np
+import joblib
+from sklearn.preprocessing import StandardScaler
+import os
+import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
+
+class AdvancedNN(nn.Module):
+    def __init__(self, input_size, n_hidden, num_layers, dropout_prob):
+        super().__init__()
+        layers = []
+        for i in range(num_layers):
+            layers.append(nn.Linear(input_size if i == 0 else n_hidden, n_hidden))
+            layers.append(nn.LayerNorm(n_hidden))
+            layers.append(nn.LeakyReLU())
+            layers.append(nn.Dropout(dropout_prob))
+        layers.append(nn.Linear(n_hidden, 1))
+        self.model = nn.Sequential(*layers)
+        self._initialize_weights()
+
+    def forward(self, x):
+        return self.model(x)
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='leaky_relu')
+                nn.init.constant_(m.bias, 0)
+
+try:
+    import torch.serialization
+    import numpy
+    torch.serialization.add_safe_globals([numpy.dtype])
+    torch.serialization.add_safe_globals([numpy._core.multiarray.scalar])
+except Exception as e:
+    pass
+
+def load_models(yield_seeds, elongation_seeds):
+    models = {
+        'yield_svr': [],
+        'yield_ann': [],
+        'elongation_svr': [],
+        'elongation_ann': []
+    }
+
+    for seed in yield_seeds:
+        for model_num in range(1, 11):
+            ann_yield_model_filename = f"/content/drive/MyDrive/HEA_yield_total/HEA_yield_2/Enhanced_model_seed{seed}_top{model_num}.pth"
+            if os.path.exists(ann_yield_model_filename):
+                try:
+                    try:
+                        saved_data = torch.load(ann_yield_model_filename, weights_only=False, map_location='cpu')
+                    except Exception:
+                        try:
+                            saved_data = torch.load(ann_yield_model_filename, map_location='cpu')
+                        except Exception as e:
+                            continue
+                    ann_model = {
+                        'model_data': saved_data,
+                        'filename': ann_yield_model_filename
+                    }
+                    models['yield_ann'].append(ann_model)
+                except Exception as e:
+                    pass
+
+        for model_num in range(10):
+            svr_yield_model_filename = f"/content/drive/MyDrive/HEA_yield_total/HEA_yield_2/SVR_model_seed_{seed}_model_{model_num + 1}.joblib"
+            if os.path.exists(svr_yield_model_filename):
+                try:
+                    svr_yield_model = joblib.load(svr_yield_model_filename)
+                    models['yield_svr'].append(svr_yield_model)
+                except Exception as e:
+                    pass
+
+    for seed in elongation_seeds:
+        for model_num in range(1, 11):
+            ann_elongation_model_filename = f"/content/drive/MyDrive/HEA_elongation_total/HEA_elongation_2/Enhanced_model_seed{seed}_top{model_num}.pth"
+            if os.path.exists(ann_elongation_model_filename):
+                try:
+                    try:
+                        saved_data = torch.load(ann_elongation_model_filename, weights_only=False, map_location='cpu')
+                    except Exception:
+                        try:
+                            saved_data = torch.load(ann_elongation_model_filename, map_location='cpu')
+                        except Exception as e:
+                            continue
+                    ann_model = {
+                        'model_data': saved_data,
+                        'filename': ann_elongation_model_filename
+                    }
+                    models['elongation_ann'].append(ann_model)
+                except Exception as e:
+                    pass
+
+        for model_num in range(10):
+            svr_elongation_model_filename = f"/content/drive/MyDrive/HEA_elongation_total/HEA_elongation_2/SVR_model_seed_{seed}_model_{model_num + 1}.joblib"
+            if os.path.exists(svr_elongation_model_filename):
+                try:
+                    svr_elongation_model = joblib.load(svr_elongation_model_filename)
+                    models['elongation_svr'].append(svr_elongation_model)
+                except Exception as e:
+                    pass
+
+    return models
+
+def predict_with_loaded_models(X1, X2, models):
+    scaler1 = StandardScaler()
+    scaler2 = StandardScaler()
+
+    file_path = r'/content/yield_strength_iter2.xlsx'
+    data = pd.read_excel(file_path)
+    data = data.dropna()
+    m1 = data.iloc[:, :-1]
+    scaler1.fit(m1)
+
+    file_path = r'/content/elongation_iter2.xlsx'
+    data = pd.read_excel(file_path)
+    data = data.dropna()
+    n1 = data.iloc[:, :-1]
+    scaler2.fit(n1)
+
+    X1_scaled = scaler1.transform(X1)
+    X2_scaled = scaler2.transform(X2)
+
+    yield_predictions = []
+
+    for model_data in models['yield_ann']:
+        try:
+            saved_data = model_data['model_data']
+            ann_model = AdvancedNN(
+                input_size=X1_scaled.shape[1],
+                n_hidden=int(saved_data['params']['n_hidden']),
+                num_layers=int(saved_data['params']['num_layers']),
+                dropout_prob=saved_data['params']['dropout_prob']
+            )
+            ann_model.load_state_dict(saved_data['model_state'])
+            ann_model.eval()
+            with torch.no_grad():
+                X_tensor = torch.tensor(X1_scaled, dtype=torch.float32)
+                prediction = ann_model(X_tensor).numpy().flatten()
+                yield_predictions.append(prediction)
+        except Exception as e:
+            pass
+
+    for model in models['yield_svr']:
+        try:
+            prediction = model.predict(X1_scaled)
+            yield_predictions.append(prediction)
+        except Exception as e:
+            pass
+
+    if yield_predictions:
+        yield_predictions = np.array(yield_predictions)
+        yield_mean_prediction = yield_predictions.mean(axis=0)
+        yield_uncertainty = yield_predictions.std(axis=0)
+    else:
+        yield_mean_prediction = np.array([])
+        yield_uncertainty = np.array([])
+
+    elongation_predictions = []
+
+    for model_data in models['elongation_ann']:
+        try:
+            saved_data = model_data['model_data']
+            ann_model = AdvancedNN(
+                input_size=X2_scaled.shape[1],
+                n_hidden=int(saved_data['params']['n_hidden']),
+                num_layers=int(saved_data['params']['num_layers']),
+                dropout_prob=saved_data['params']['dropout_prob']
+            )
+            ann_model.load_state_dict(saved_data['model_state'])
+            ann_model.eval()
+            with torch.no_grad():
+                X_tensor = torch.tensor(X2_scaled, dtype=torch.float32)
+                prediction = ann_model(X_tensor).numpy().flatten()
+                elongation_predictions.append(prediction)
+        except Exception as e:
+            pass
+
+    for model in models['elongation_svr']:
+        try:
+            prediction = model.predict(X2_scaled)
+            elongation_predictions.append(prediction)
+        except Exception as e:
+            pass
+
+    if elongation_predictions:
+        elongation_predictions = np.array(elongation_predictions)
+        elongation_mean_prediction = elongation_predictions.mean(axis=0)
+        elongation_uncertainty = elongation_predictions.std(axis=0)
+    else:
+        elongation_mean_prediction = np.array([])
+        elongation_uncertainty = np.array([])
+
+    return yield_mean_prediction, yield_uncertainty, elongation_mean_prediction, elongation_uncertainty
+
+def main():
+    yield_file_path = r'/content/yield_strength_iter2.xlsx'
+    yield_data = pd.read_excel(yield_file_path)
+    yield_data = yield_data.dropna()
+
+    elongation_file_path = r'/content/elongation_iter2.xlsx'
+    elongation_data = pd.read_excel(elongation_file_path)
+    elongation_data = elongation_data.dropna()
+
+    X1 = yield_data.iloc[:, :-1]
+    y1 = yield_data.iloc[:, -1]
+
+    X2 = elongation_data.iloc[:, :-1]
+    y2 = elongation_data.iloc[:, -1]
+
+    yield_seeds = [40, 41, 42, 43, 44]
+    elongation_seeds = [40, 41, 42, 43, 44]
+    models = load_models(yield_seeds, elongation_seeds)
+
+    yield_mean, yield_uncertainty, elongation_mean, elongation_uncertainty = predict_with_loaded_models(X1, X2, models)
+
+    if len(yield_mean) > 0:
+        rmse_yield = np.sqrt(np.mean((yield_mean - y1)**2))
+        ss_total_yield = np.sum((y1 - y1.mean())**2)
+        ss_residual_yield = np.sum((y1 - yield_mean)**2)
+        r2_yield = 1 - (ss_residual_yield / ss_total_yield)
+
+        yield_result_df = pd.DataFrame({
+            'Actual Values': y1,
+            'Predicted Mean': yield_mean,
+            'Prediction Uncertainty': yield_uncertainty
+        })
+
+        yield_result_filename = '/content/drive/MyDrive/HEA_data/yield_ensemble_predictions.csv'
+        yield_result_df.to_csv(yield_result_filename, index=False)
+
+        plt.figure(figsize=(10, 6))
+        plt.scatter(y1, yield_mean, color='blue', label='Predictions vs Actual', marker='o')
+        plt.errorbar(y1, yield_mean, yerr=yield_uncertainty, fmt='o', color='red', label='Uncertainty (Standard Deviation)')
+        plt.plot([min(y1), max(y1)], [min(y1), max(y1)], color='black', linestyle='--', label='y = x')
+        plt.text(0.05, 0.95, f"RMSE: {rmse_yield:.2f}\nR²: {r2_yield:.4f}", transform=plt.gca().transAxes, va='top')
+        plt.title('Yield Strength: Predictions vs Actual with Uncertainty')
+        plt.xlabel('Actual Values (MPa)')
+        plt.ylabel('Predicted Values (MPa)')
+        plt.legend()
+        plt.tight_layout()
+
+        yield_plt_filename = '/content/drive/MyDrive/HEA_data/yield_ensemble_visualization.png'
+        plt.savefig(yield_plt_filename)
+        plt.show()
+
+    if len(elongation_mean) > 0:
+        rmse_elongation = np.sqrt(np.mean((elongation_mean - y2)**2))
+        ss_total_elongation = np.sum((y2 - y2.mean())**2)
+        ss_residual_elongation = np.sum((y2 - elongation_mean)**2)
+        r2_elongation = 1 - (ss_residual_elongation / ss_total_elongation)
+
+        elongation_result_df = pd.DataFrame({
+            'Actual Values': y2,
+            'Predicted Mean': elongation_mean,
+            'Prediction Uncertainty': elongation_uncertainty
+        })
+
+        elongation_result_filename = '/content/drive/MyDrive/HEA_data/elongation_ensemble_predictions.csv'
+        elongation_result_df.to_csv(elongation_result_filename, index=False)
+
+        plt.figure(figsize=(10, 6))
+        plt.scatter(y2, elongation_mean, color='blue', label='Predictions vs Actual', marker='o')
+        plt.errorbar(y2, elongation_mean, yerr=elongation_uncertainty, fmt='o', color='red', label='Uncertainty (Standard Deviation)')
+        plt.plot([min(y2), max(y2)], [min(y2), max(y2)], color='black', linestyle='--', label='y = x')
+        plt.text(0.05, 0.95, f"RMSE: {rmse_elongation:.2f}\nR²: {r2_elongation:.4f}", transform=plt.gca().transAxes, va='top')
+        plt.title('Elongation: Predictions vs Actual with Uncertainty')
+        plt.xlabel('Actual Values (%)')
+        plt.ylabel('Predicted Values (%)')
+        plt.legend()
+        plt.tight_layout()
+
+        elongation_plt_filename = '/content/drive/MyDrive/HEA_data/elongation_ensemble_visualization.png'
+        plt.savefig(elongation_plt_filename)
+        plt.show()
+
+if __name__ == "__main__":
+    main()

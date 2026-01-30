@@ -1,0 +1,230 @@
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Circle, Wedge
+from matplotlib.lines import Line2D
+from sklearn.model_selection import KFold, cross_val_predict
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.svm import SVR
+from sklearn.preprocessing import StandardScaler
+
+file_path = r'/content/yield_strength_features.xlsx'
+data = pd.read_excel(file_path)
+
+X = data.iloc[:, :-1]
+y = data.iloc[:, -1]
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+X_scaled = pd.DataFrame(X_scaled, columns=X.columns)
+
+data_selected = X.iloc[:, 13:]
+correlation_matrix = data_selected.corr(method='pearson')
+
+correlation_matrix.to_excel('pearson_correlation_matrix.xlsx', sheet_name='Correlation_Matrix')
+
+high_corr_pairs = []
+corr_threshold = 0.9
+
+for i in range(correlation_matrix.shape[0]):
+    for j in range(i+1, correlation_matrix.shape[1]):
+        if abs(correlation_matrix.iloc[i, j]) > corr_threshold:
+            feature_i = correlation_matrix.index[i]
+            feature_j = correlation_matrix.columns[j]
+            corr_value = correlation_matrix.iloc[i, j]
+            high_corr_pairs.append((feature_i, feature_j, corr_value))
+
+if high_corr_pairs:
+    high_corr_df = pd.DataFrame(high_corr_pairs, columns=['Feature1', 'Feature2', 'Correlation'])
+    high_corr_df.to_excel('high_correlation_pairs.xlsx', index=False, sheet_name='High_Correlation')
+
+with pd.ExcelWriter('pearson_analysis_results.xlsx', engine='openpyxl') as writer:
+    correlation_matrix.to_excel(writer, sheet_name='Correlation_Matrix')
+    
+    if high_corr_pairs:
+        high_corr_df.to_excel(writer, sheet_name='High_Correlation_Pairs', index=False)
+    
+    summary_data = {
+        'Statistic': ['Total Features', 'Features Analyzed', 'High Correlation Pairs', 'Correlation Threshold'],
+        'Value': [X.shape[1], data_selected.shape[1], len(high_corr_pairs), corr_threshold]
+    }
+    summary_df = pd.DataFrame(summary_data)
+    summary_df.to_excel(writer, sheet_name='Summary', index=False)
+    
+    corr_values = []
+    for i in range(correlation_matrix.shape[0]):
+        for j in range(i+1, correlation_matrix.shape[1]):
+            corr_values.append(correlation_matrix.iloc[i, j])
+    
+    corr_stats = pd.DataFrame({'Correlation_Values': corr_values})
+    corr_distribution = pd.DataFrame({
+        'Statistic': ['Count', 'Mean', 'Std', 'Min', '25%', '50%', '75%', 'Max'],
+        'Value': [
+            len(corr_values),
+            np.mean(corr_values),
+            np.std(corr_values),
+            np.min(corr_values),
+            np.percentile(corr_values, 25),
+            np.percentile(corr_values, 50),
+            np.percentile(corr_values, 75),
+            np.max(corr_values)
+        ]
+    })
+    corr_distribution.to_excel(writer, sheet_name='Correlation_Statistics', index=False)
+    corr_stats.to_excel(writer, sheet_name='All_Correlation_Values', index=False)
+
+def plot_correlation_matrix(correlation_matrix):
+    mask = np.triu(np.ones_like(correlation_matrix, dtype=bool))
+    correlation_masked = correlation_matrix.where(mask)
+    plt.figure(figsize=(14, 12))
+    ax = plt.gca()
+    
+    for i in range(correlation_matrix.shape[0]):
+        for j in range(correlation_matrix.shape[1]):
+            if i <= j:
+                value = correlation_masked.iloc[i, j]
+                if not np.isnan(value):
+                    x, y = j + 0.5, i + 0.5
+                    radius = 0.4
+                    abs_value = abs(value)
+                    
+                    background = Circle((x, y), radius, facecolor='none', edgecolor='lightgrey', linewidth=0.5, alpha=0.5)
+                    ax.add_patch(background)
+                    
+                    if abs_value >= 0.999:
+                        color = '#d7191c' if value > 0 else '#2b83ba'
+                        full_circle = Circle((x, y), radius, facecolor=color, edgecolor='w', alpha=0.8)
+                        ax.add_patch(full_circle)
+                    else:
+                        if value > 0:
+                            theta = 360 * abs_value
+                            wedge = Wedge((x, y), radius, 90 - theta/2, 90 + theta/2, facecolor='#d7191c', edgecolor='w', alpha=0.8)
+                        else:
+                            theta = 360 * abs_value
+                            wedge = Wedge((x, y), radius, 270 - theta/2, 270 + theta/2, facecolor='#2b83ba', edgecolor='w', alpha=0.8)
+                        ax.add_patch(wedge)
+                    
+                    if abs_value > 0.9 and i != j:
+                        ax.plot(x, y, '*', color='gold', markersize=12, markeredgecolor='k')
+    
+    plt.xticks(ticks=np.arange(correlation_matrix.shape[1]) + 0.5, labels=correlation_matrix.columns, rotation=45, ha='right', fontsize=10)
+    plt.yticks(ticks=np.arange(correlation_matrix.shape[0]) + 0.5, labels=correlation_matrix.columns, fontsize=10)
+    plt.xlim(0, correlation_matrix.shape[1])
+    plt.ylim(correlation_matrix.shape[0], 0)
+    ax.invert_yaxis()
+    
+    legend_elements = [
+        Line2D([0], [0], marker='o', color='w', label='Positive (r>0)', markerfacecolor='#d7191c', markersize=15),
+        Line2D([0], [0], marker='o', color='w', label='Negative (r<0)', markerfacecolor='#2b83ba', markersize=15),
+        Line2D([0], [0], marker='*', color='gold', label='|r| > 0.9', markersize=15, markeredgecolor='k')
+    ]
+    
+    plt.legend(handles=legend_elements, title='Legend', bbox_to_anchor=(1.05, 1), loc='upper left', frameon=True)
+    plt.title("Pearson Correlation Matrix", fontsize=14, pad=20)
+    plt.tight_layout()
+    plt.grid(False)
+    plt.show()
+
+plot_correlation_matrix(correlation_matrix)
+
+def custom_group_kfold(X, y, group_labels, n_splits=5, random_state=42):
+    from sklearn.model_selection import KFold
+    unique_groups = np.unique(group_labels)
+    groups = {group: np.where(group_labels == group)[0] for group in unique_groups}
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+    fold_indices = {i: [] for i in range(n_splits)}
+    for group in unique_groups:
+        group_samples = groups[group]
+        for fold, (train_idx, test_idx) in enumerate(kf.split(group_samples)):
+            fold_indices[fold].extend(group_samples[test_idx])
+    for fold in fold_indices:
+        fold_indices[fold] = np.array(fold_indices[fold])
+    return fold_indices
+
+group_sizes = [15,6,12,5,11,11,7,5,9,5,7,11,7]
+group_labels = []
+current_group = 1
+for size in group_sizes:
+    group_labels.extend([current_group] * size)
+    current_group += 1
+group_labels = np.array(group_labels)
+
+def evaluate_model_with_ten_fold_cv(model, X, y):
+    all_rmse_results = []
+    all_r2_results = []
+    for seed in range(40, 50):
+        fold_indices = custom_group_kfold(X, y, group_labels, n_splits=5, random_state=seed)
+        for fold, test_idx in fold_indices.items():
+            train_idx = np.setdiff1d(np.arange(len(X)), test_idx)
+            X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+            y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test)
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            r2 = r2_score(y_test, y_pred)
+            all_rmse_results.append(rmse)
+            all_r2_results.append(r2)
+    mean_rmse = np.mean(all_rmse_results)
+    std_rmse = np.std(all_rmse_results)
+    mean_r2 = np.mean(all_r2_results)
+    std_r2 = np.std(all_r2_results)
+    return mean_rmse, std_rmse, mean_r2, std_r2, all_rmse_results, all_r2_results
+
+best_C = 900.81
+best_epsilon = 3.8196
+best_model = SVR(C=best_C, epsilon=best_epsilon, kernel='rbf')
+
+base_rmse, base_rmse_std, base_r2, base_r2_std, base_rmse_all, base_r2_all = evaluate_model_with_ten_fold_cv(best_model, X_scaled, y)
+
+high_corr_features = set()
+for pair in high_corr_pairs:
+    high_corr_features.add(pair[0])
+    high_corr_features.add(pair[1])
+
+results = []
+
+for i, feature in enumerate(high_corr_features):
+    X_temp = X_scaled.drop(columns=[feature])
+    temp_rmse, temp_rmse_std, temp_r2, temp_r2_std, temp_rmse_all, temp_r2_all = evaluate_model_with_ten_fold_cv(best_model, X_temp, y)
+    results.append({
+        'feature': feature,
+        'rmse_mean': temp_rmse,
+        'rmse_std': temp_rmse_std,
+        'r2_mean': temp_r2,
+        'r2_std': temp_r2_std
+    })
+
+results_sorted = sorted(results, key=lambda x: x['rmse_mean'])
+
+results_df = pd.DataFrame(results_sorted)
+results_df.to_excel('feature_removal_results.xlsx', index=False, sheet_name='Results')
+
+best_feature = results_sorted[0]['feature']
+best_rmse = results_sorted[0]['rmse_mean']
+best_rmse_std = results_sorted[0]['rmse_std']
+best_r2 = results_sorted[0]['r2_mean']
+best_r2_std = results_sorted[0]['r2_std']
+
+X_best = X_scaled.drop(columns=[best_feature])
+final_rmse, final_rmse_std, final_r2, final_r2_std, final_rmse_all, final_r2_all = evaluate_model_with_ten_fold_cv(best_model, X_best, y)
+
+final_results = pd.DataFrame({
+    'Model': ['Baseline', 'After Feature Removal'],
+    'RMSE_Mean': [base_rmse, final_rmse],
+    'RMSE_Std': [base_rmse_std, final_rmse_std],
+    'R2_Mean': [base_r2, final_r2],
+    'R2_Std': [base_r2_std, final_r2_std],
+    'Features_Used': [X_scaled.shape[1], X_best.shape[1]],
+    'Removed_Feature': ['None', best_feature]
+})
+final_results.to_excel('final_model_comparison.xlsx', index=False, sheet_name='Comparison')
+
+cv_details = pd.DataFrame({
+    'Baseline_RMSE': base_rmse_all,
+    'Baseline_R2': base_r2_all,
+    'Final_RMSE': final_rmse_all,
+    'Final_R2': final_r2_all
+})
+cv_details.to_excel('cv_details.xlsx', index=False, sheet_name='CV_Results')
