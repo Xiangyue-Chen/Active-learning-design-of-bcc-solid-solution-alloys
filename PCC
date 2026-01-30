@@ -6,7 +6,7 @@ from matplotlib.colors import ListedColormap
 from matplotlib.patches import Circle, Wedge
 from matplotlib.lines import Line2D
 from sklearn.model_selection import KFold, cross_val_predict
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_squared_error
 from sklearn.svm import SVR
 from sklearn.preprocessing import StandardScaler
 
@@ -153,7 +153,6 @@ group_labels = np.array(group_labels)
 
 def evaluate_model_with_ten_fold_cv(model, X, y):
     all_rmse_results = []
-    all_r2_results = []
     for seed in range(40, 50):
         fold_indices = custom_group_kfold(X, y, group_labels, n_splits=5, random_state=seed)
         for fold, test_idx in fold_indices.items():
@@ -163,20 +162,16 @@ def evaluate_model_with_ten_fold_cv(model, X, y):
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
             rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-            r2 = r2_score(y_test, y_pred)
             all_rmse_results.append(rmse)
-            all_r2_results.append(r2)
     mean_rmse = np.mean(all_rmse_results)
     std_rmse = np.std(all_rmse_results)
-    mean_r2 = np.mean(all_r2_results)
-    std_r2 = np.std(all_r2_results)
-    return mean_rmse, std_rmse, mean_r2, std_r2, all_rmse_results, all_r2_results
+    return mean_rmse, std_rmse, all_rmse_results
 
 best_C = 900.81
 best_epsilon = 3.8196
 best_model = SVR(C=best_C, epsilon=best_epsilon, kernel='rbf')
 
-base_rmse, base_rmse_std, base_r2, base_r2_std, base_rmse_all, base_r2_all = evaluate_model_with_ten_fold_cv(best_model, X_scaled, y)
+base_rmse, base_rmse_std, base_rmse_all = evaluate_model_with_ten_fold_cv(best_model, X_scaled, y)
 
 high_corr_features = set()
 for pair in high_corr_pairs:
@@ -187,13 +182,11 @@ results = []
 
 for i, feature in enumerate(high_corr_features):
     X_temp = X_scaled.drop(columns=[feature])
-    temp_rmse, temp_rmse_std, temp_r2, temp_r2_std, temp_rmse_all, temp_r2_all = evaluate_model_with_ten_fold_cv(best_model, X_temp, y)
+    temp_rmse, temp_rmse_std, temp_rmse_all = evaluate_model_with_ten_fold_cv(best_model, X_temp, y)
     results.append({
         'feature': feature,
         'rmse_mean': temp_rmse,
-        'rmse_std': temp_rmse_std,
-        'r2_mean': temp_r2,
-        'r2_std': temp_r2_std
+        'rmse_std': temp_rmse_std
     })
 
 results_sorted = sorted(results, key=lambda x: x['rmse_mean'])
@@ -204,18 +197,14 @@ results_df.to_excel('feature_removal_results.xlsx', index=False, sheet_name='Res
 best_feature = results_sorted[0]['feature']
 best_rmse = results_sorted[0]['rmse_mean']
 best_rmse_std = results_sorted[0]['rmse_std']
-best_r2 = results_sorted[0]['r2_mean']
-best_r2_std = results_sorted[0]['r2_std']
 
 X_best = X_scaled.drop(columns=[best_feature])
-final_rmse, final_rmse_std, final_r2, final_r2_std, final_rmse_all, final_r2_all = evaluate_model_with_ten_fold_cv(best_model, X_best, y)
+final_rmse, final_rmse_std, final_rmse_all = evaluate_model_with_ten_fold_cv(best_model, X_best, y)
 
 final_results = pd.DataFrame({
     'Model': ['Baseline', 'After Feature Removal'],
     'RMSE_Mean': [base_rmse, final_rmse],
     'RMSE_Std': [base_rmse_std, final_rmse_std],
-    'R2_Mean': [base_r2, final_r2],
-    'R2_Std': [base_r2_std, final_r2_std],
     'Features_Used': [X_scaled.shape[1], X_best.shape[1]],
     'Removed_Feature': ['None', best_feature]
 })
@@ -223,8 +212,6 @@ final_results.to_excel('final_model_comparison.xlsx', index=False, sheet_name='C
 
 cv_details = pd.DataFrame({
     'Baseline_RMSE': base_rmse_all,
-    'Baseline_R2': base_r2_all,
-    'Final_RMSE': final_rmse_all,
-    'Final_R2': final_r2_all
+    'Final_RMSE': final_rmse_all
 })
 cv_details.to_excel('cv_details.xlsx', index=False, sheet_name='CV_Results')
