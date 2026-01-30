@@ -25,8 +25,7 @@ def train_model(C, epsilon):
     }
     model = SVR(**params)
     
-    all_y_true = []
-    all_y_pred = []
+    all_rmse_results = []
     
     for seed in range(40, 50):
         kf = KFold(n_splits=5, shuffle=True, random_state=seed)
@@ -35,15 +34,15 @@ def train_model(C, epsilon):
             y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
-            all_y_true.extend(y_test)
-            all_y_pred.extend(y_pred)
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            all_rmse_results.append(rmse)
     
-    rmse = np.sqrt(mean_squared_error(all_y_true, all_y_pred))
-    return -rmse
+    mean_rmse = np.mean(all_rmse_results)
+    return -mean_rmse
 
 bounds = {
-    'C': (1, 10000),
-    'epsilon': (0.01, 100)
+    'C': (1, 1000),
+    'epsilon': (0.1, 10)
 }
 
 optimizer = BayesianOptimization(
@@ -68,6 +67,7 @@ best_model = SVR(
     kernel='rbf'
 )
 
+all_rmse_results = []
 all_y_true = []
 all_y_pred = []
 
@@ -78,10 +78,15 @@ for seed in range(40, 50):
         y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
         best_model.fit(X_train, y_train)
         y_pred = best_model.predict(X_test)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        all_rmse_results.append(rmse)
         all_y_true.extend(y_test)
         all_y_pred.extend(y_pred)
 
-rmse = np.sqrt(mean_squared_error(all_y_true, all_y_pred))
+mean_rmse = np.mean(all_rmse_results)
+std_rmse = np.std(all_rmse_results)
+
+print(f"RMSE = {mean_rmse:.4f} ± {std_rmse:.4f}")
 
 plt.figure(figsize=(6,6))
 plt.scatter(all_y_true, all_y_pred, alpha=0.7)
