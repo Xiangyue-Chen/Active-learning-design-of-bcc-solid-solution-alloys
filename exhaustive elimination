@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.svm import SVR
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import KFold
 from itertools import combinations
@@ -44,7 +44,6 @@ group_labels = np.array(group_labels)
 
 def evaluate_model_with_ten_fold_cv(X, y):
     all_rmse_results = []
-    all_r2_results = []
     for seed in range(40, 50):
         fold_indices = custom_group_kfold(X, y, group_labels, n_splits=5, random_state=seed)
         for fold, test_idx in fold_indices.items():
@@ -55,14 +54,10 @@ def evaluate_model_with_ten_fold_cv(X, y):
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
             rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-            r2 = r2_score(y_test, y_pred)
             all_rmse_results.append(rmse)
-            all_r2_results.append(r2)
     mean_rmse = np.mean(all_rmse_results)
     std_rmse = np.std(all_rmse_results)
-    mean_r2 = np.mean(all_r2_results)
-    std_r2 = np.std(all_r2_results)
-    return mean_rmse, std_rmse, mean_r2, std_r2
+    return mean_rmse, std_rmse
 
 fixed_features = list(X_scaled.columns[:13])
 candidate_features = list(X_scaled.columns[13:])
@@ -89,7 +84,7 @@ for r in range(len(candidate_features) + 1):
         combination_count += 1
         current_features = fixed_features + list(selected_candidates)
         X_current = X_scaled[current_features]
-        rmse, rmse_std, r2, r2_std = evaluate_model_with_ten_fold_cv(X_current, y)
+        rmse, rmse_std = evaluate_model_with_ten_fold_cv(X_current, y)
 
         result = {
             'Combination_ID': combination_count,
@@ -99,9 +94,7 @@ for r in range(len(candidate_features) + 1):
             'Selected_Candidate_Names': list(selected_candidates),
             'All_Features': current_features,
             'RMSE_Mean': rmse,
-            'RMSE_Std': rmse_std,
-            'R2_Mean': r2,
-            'R2_Std': r2_std
+            'RMSE_Std': rmse_std
         }
         all_results.append(result)
 
@@ -121,15 +114,13 @@ top_results_file = '/content/drive/MyDrive/HEA_data/exhaustive_top20.xlsx'
 top_results.to_excel(top_results_file, index=False)
 
 best_subset_info = pd.DataFrame({
-    'Metric': ['Combination_ID', 'Total_Features', 'Selected_Candidates', 'RMSE_Mean', 'RMSE_Std', 'R2_Mean', 'R2_Std'],
+    'Metric': ['Combination_ID', 'Total_Features', 'Selected_Candidates', 'RMSE_Mean', 'RMSE_Std'],
     'Value': [
         best_global_performance['Combination_ID'],
         best_global_performance['Total_Features'],
         best_global_performance['Selected_Candidates'],
         best_global_performance['RMSE_Mean'],
-        best_global_performance['RMSE_Std'],
-        best_global_performance['R2_Mean'],
-        best_global_performance['R2_Std']
+        best_global_performance['RMSE_Std']
     ]
 })
 
@@ -144,15 +135,14 @@ with pd.ExcelWriter(best_combination_file, engine='openpyxl') as writer:
     best_features_list.to_excel(writer, sheet_name='Feature_List', index=False)
 
 feature_count_analysis = results_df.groupby('Total_Features').agg({
-    'RMSE_Mean': ['count', 'mean', 'min', 'max', 'std'],
-    'R2_Mean': ['mean', 'min', 'max']
+    'RMSE_Mean': ['count', 'mean', 'min', 'max', 'std']
 }).round(4)
 
 best_by_feature_count = results_df.loc[results_df.groupby('Total_Features')['RMSE_Mean'].idxmin()]
 
-plt.figure(figsize=(12, 8))
+plt.figure(figsize=(12, 6))
 
-plt.subplot(2, 2, 1)
+plt.subplot(1, 2, 1)
 feature_counts = results_df['Total_Features'].values
 rmse_values = results_df['RMSE_Mean'].values
 plt.scatter(feature_counts, rmse_values, alpha=0.6, s=20)
@@ -163,17 +153,7 @@ plt.title('RMSE vs Number of Features')
 plt.legend()
 plt.grid(True, alpha=0.3)
 
-plt.subplot(2, 2, 2)
-r2_values = results_df['R2_Mean'].values
-plt.scatter(feature_counts, r2_values, alpha=0.6, s=20)
-plt.plot(best_by_feature_count['Total_Features'], best_by_feature_count['R2_Mean'], 'r-o', label='Best per feature count')
-plt.xlabel('Number of Features')
-plt.ylabel('R²')
-plt.title('R² vs Number of Features')
-plt.legend()
-plt.grid(True, alpha=0.3)
-
-plt.subplot(2, 2, 3)
+plt.subplot(1, 2, 2)
 plt.hist(rmse_values, bins=30, alpha=0.7, edgecolor='black')
 plt.axvline(best_global_performance['RMSE_Mean'], color='red', linestyle='--', label=f'Best: {best_global_performance["RMSE_Mean"]:.4f}')
 plt.xlabel('RMSE')
@@ -182,19 +162,11 @@ plt.title('RMSE Distribution')
 plt.legend()
 plt.grid(True, alpha=0.3)
 
-plt.subplot(2, 2, 4)
-top_20 = results_df_sorted.head(20)
-plt.bar(range(len(top_20)), top_20['RMSE_Mean'], alpha=0.7)
-plt.xlabel('Rank')
-plt.ylabel('RMSE')
-plt.title('Top 20 Best Results')
-plt.grid(True, alpha=0.3)
-
 plt.tight_layout()
 plt.show()
 
 X_best = X_scaled[best_global_feature_set]
-final_rmse, final_rmse_std, final_r2, final_r2_std = evaluate_model_with_ten_fold_cv(X_best, y)
+final_rmse, final_rmse_std = evaluate_model_with_ten_fold_cv(X_best, y)
 
 all_y_true = []
 all_y_pred = []
@@ -216,7 +188,7 @@ plt.scatter(all_y_true, all_y_pred, color='gold', alpha=0.6, label='Best Feature
 plt.plot([min(all_y_true), max(all_y_true)], [min(all_y_true), max(all_y_true)], color='red', linestyle='--', label='Perfect Prediction')
 plt.xlabel('Actual Values')
 plt.ylabel('Predicted Values')
-plt.title(f"Best Feature Combination Performance (Exhaustive Search)\nFeatures: {len(best_global_feature_set)}, RMSE={final_rmse:.4f}±{final_rmse_std:.4f}, R²={final_r2:.4f}±{final_r2_std:.4f}")
+plt.title(f"Best Feature Combination Performance (Exhaustive Search)\nFeatures: {len(best_global_feature_set)}, RMSE={final_rmse:.4f}±{final_rmse_std:.4f}")
 plt.legend()
 plt.grid(True, alpha=0.3)
 plt.tight_layout()
