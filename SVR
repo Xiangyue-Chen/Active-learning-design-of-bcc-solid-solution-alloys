@@ -1,8 +1,8 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.model_selection import KFold, cross_val_predict
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.model_selection import KFold
+from sklearn.metrics import mean_squared_error
 from sklearn.svm import SVR
 from sklearn.preprocessing import StandardScaler
 from bayes_opt import BayesianOptimization
@@ -24,10 +24,21 @@ def train_model(C, epsilon):
         'kernel': 'rbf'
     }
     model = SVR(**params)
-    kf = KFold(n_splits=5, shuffle=True, random_state=42)
-    y_pred = cross_val_predict(model, X, y, cv=kf)
-    rmse = np.sqrt(mean_squared_error(y, y_pred))
-    r2 = r2_score(y, y_pred)
+    
+    all_y_true = []
+    all_y_pred = []
+    
+    for seed in range(40, 50):
+        kf = KFold(n_splits=5, shuffle=True, random_state=seed)
+        for train_idx, test_idx in kf.split(X):
+            X_train, X_test = X[train_idx], X[test_idx]
+            y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test)
+            all_y_true.extend(y_test)
+            all_y_pred.extend(y_pred)
+    
+    rmse = np.sqrt(mean_squared_error(all_y_true, all_y_pred))
     return -rmse
 
 bounds = {
@@ -47,7 +58,6 @@ results_df = pd.DataFrame([{
     'target': res['target'],
     **res['params']
 } for res in optimizer.res])
-
 results_df = results_df.sort_values(by='target', ascending=False)
 results_df.to_excel('SVR_optimization_results.xlsx', index=False)
 
@@ -58,18 +68,27 @@ best_model = SVR(
     kernel='rbf'
 )
 
-kf = KFold(n_splits=5, shuffle=True, random_state=42)
-y_pred = cross_val_predict(best_model, X, y, cv=kf)
+all_y_true = []
+all_y_pred = []
 
-rmse = np.sqrt(mean_squared_error(y, y_pred))
-r2 = r2_score(y, y_pred)
+for seed in range(40, 50):
+    kf = KFold(n_splits=5, shuffle=True, random_state=seed)
+    for train_idx, test_idx in kf.split(X):
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+        best_model.fit(X_train, y_train)
+        y_pred = best_model.predict(X_test)
+        all_y_true.extend(y_test)
+        all_y_pred.extend(y_pred)
+
+rmse = np.sqrt(mean_squared_error(all_y_true, all_y_pred))
 
 plt.figure(figsize=(6,6))
-plt.scatter(y, y_pred, alpha=0.7)
-plt.plot([y.min(), y.max()], [y.min(), y.max()], 'r--')
+plt.scatter(all_y_true, all_y_pred, alpha=0.7)
+plt.plot([min(all_y_true), max(all_y_true)], [min(all_y_true), max(all_y_true)], 'r--')
 plt.xlabel("True Yield Strength")
 plt.ylabel("Predicted Yield Strength")
-plt.title("5-Fold CV: Predicted vs True Yield Strength (Optimized)")
+plt.title("10x5-Fold CV: Predicted vs True Yield Strength (Optimized)")
 plt.grid(True)
 plt.tight_layout()
 plt.show()
