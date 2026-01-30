@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.svm import SVR
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import KFold, cross_val_predict
 from bayes_opt import BayesianOptimization
@@ -43,7 +43,7 @@ for size in group_sizes:
     current_group += 1
 group_labels = np.array(group_labels)
 
-creator.create("FitnessMinMax", base.Fitness, weights=(-1.0, 1.0))
+creator.create("FitnessMinMax", base.Fitness, weights=(-1.0,))
 creator.create("Individual", list, fitness=creator.FitnessMinMax)
 
 def create_individual():
@@ -56,11 +56,10 @@ def evaluate(individual):
     selected_features += [X_scaled.columns[i] for i in range(13, len(individual)) if individual[i] == 1]
     
     if len(selected_features) == 0:
-        return 999999, 0.0
+        return (999999,)
     
     X_selected = X_scaled[selected_features]
     all_rmse_results = []
-    all_r2_results = []
     
     for seed in range(40, 50):
         fold_indices = custom_group_kfold(X_selected, y, group_labels, n_splits=5, random_state=seed)
@@ -72,13 +71,10 @@ def evaluate(individual):
             model.fit(X_train, y_train)
             y_pred = model.predict(X_test)
             rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-            r2 = r2_score(y_test, y_pred)
             all_rmse_results.append(rmse)
-            all_r2_results.append(r2)
     
     avg_rmse = np.mean(all_rmse_results)
-    avg_r2 = np.mean(all_r2_results)
-    return avg_rmse, avg_r2
+    return (avg_rmse,)
 
 def mutate(individual):
     for i in range(13, len(individual)):
@@ -101,14 +97,14 @@ toolbox.register("mutate", mutate)
 toolbox.register("select", tools.selTournament, tournsize=3)
 toolbox.register("evaluate", evaluate)
 
-results_df = pd.DataFrame(columns=['Generation', 'Best_RMSE', 'Best_R2', 'Avg_RMSE', 'Avg_R2',
+results_df = pd.DataFrame(columns=['Generation', 'Best_RMSE', 'Avg_RMSE',
                                    'Selected_Features', 'Num_Features', 'Num_Additional_Features',
                                    'Additional_Features', 'Best_Individual'])
 
 population = toolbox.population(n=100)
 generations = 50
 best_individual_overall = None
-best_fitness_overall = (float('inf'), -float('inf'))
+best_fitness_overall = float('inf')
 
 for gen in range(generations):
     offspring = toolbox.select(population, len(population))
@@ -133,16 +129,14 @@ for gen in range(generations):
     population[:] = offspring
     
     rmse_values = [ind.fitness.values[0] for ind in population]
-    r2_values = [ind.fitness.values[1] for ind in population]
     avg_rmse = np.mean(rmse_values)
-    avg_r2 = np.mean(r2_values)
     
     best_individual = tools.selBest(population, 1)[0]
-    best_rmse, best_r2 = best_individual.fitness.values
+    best_rmse = best_individual.fitness.values[0]
     
-    if best_rmse < best_fitness_overall[0] and best_r2 > best_fitness_overall[1]:
+    if best_rmse < best_fitness_overall:
         best_individual_overall = best_individual.copy()
-        best_fitness_overall = (best_rmse, best_r2)
+        best_fitness_overall = best_rmse
     
     selected_features = [X_scaled.columns[i] for i in range(len(best_individual)) if best_individual[i] == 1]
     additional_features = get_additional_features(best_individual)
@@ -152,9 +146,7 @@ for gen in range(generations):
     new_row = pd.DataFrame({
         'Generation': [gen],
         'Best_RMSE': [best_rmse],
-        'Best_R2': [best_r2],
         'Avg_RMSE': [avg_rmse],
-        'Avg_R2': [avg_r2],
         'Selected_Features': [', '.join(selected_features)],
         'Num_Features': [num_features],
         'Num_Additional_Features': [num_additional_features],
@@ -169,7 +161,7 @@ for gen in range(generations):
 results_df.to_excel('ga_results_final.xlsx', index=False)
 
 if best_individual_overall is not None:
-    best_rmse, best_r2 = best_fitness_overall
+    best_rmse = best_fitness_overall
     selected_features = [X_scaled.columns[i] for i in range(len(best_individual_overall)) if best_individual_overall[i] == 1]
     additional_features = get_additional_features(best_individual_overall)
 else:
