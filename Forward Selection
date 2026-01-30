@@ -219,7 +219,7 @@ plt.show()
 
 if global_best_performance['Round'] != len(feature_sets_performance) - 1:
     X_best_subset = X_scaled[global_best_feature_set]
-    best_rmse, best_rmse_std, best_r2, best_r2_std, best_y_true, best_y_pred = evaluate_model_with_ten_fold_cv(X_best_subset, y)
+    best_rmse, best_rmse_std, best_y_true, best_y_pred = evaluate_model_with_ten_fold_cv(X_best_subset, y)
 
     plt.figure(figsize=(10, 8))
     plt.scatter(best_y_true, best_y_pred, color='gold', alpha=0.6, label='Best Feature Subset')
@@ -228,7 +228,7 @@ if global_best_performance['Round'] != len(feature_sets_performance) - 1:
     plt.xlabel('Actual Values')
     plt.ylabel('Predicted Values')
     plt.title(f"Best Feature Subset Performance (Round {global_best_performance['Round']})\n" +
-              f"Features: {len(global_best_feature_set)}, RMSE={best_rmse:.4f}±{best_rmse_std:.4f}, R²={best_r2:.4f}±{best_r2_std:.4f}")
+              f"Features: {len(global_best_feature_set)}, RMSE={best_rmse:.4f}±{best_rmse_std:.4f}")
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
